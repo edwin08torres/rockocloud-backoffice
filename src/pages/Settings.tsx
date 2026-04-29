@@ -14,16 +14,14 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import toast from "react-hot-toast";
 
-import { useAuthStore } from "../stores/useAuthStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 
-const API_URL = "http://localhost:5165";
-
+const API_URL = import.meta.env.VITE_API_URL;
 
 interface Branch {
   id: string;
   name: string;
 }
-
 
 function BranchSkeleton() {
   return (
@@ -55,7 +53,6 @@ function BranchSkeleton() {
     </div>
   );
 }
-
 
 function BranchCard({ branch }: { branch: Branch }) {
   const truncatedId = branch.id.length > 12
@@ -131,7 +128,6 @@ function BranchCard({ branch }: { branch: Branch }) {
     </div>
   );
 }
-
 
 function CreateBranchModal({
   onClose,
@@ -367,7 +363,6 @@ function CreateBranchModal({
   );
 }
 
-
 function ProfileTab() {
   const { user } = useAuthStore();
 
@@ -436,7 +431,6 @@ function ProfileTab() {
     </div>
   );
 }
-
 
 function BranchesTab() {
   const { token } = useAuthStore();
@@ -593,10 +587,6 @@ function BranchesTab() {
     </div>
   );
 }
-
-/* ═══════════════════════════
-   SETTINGS PAGE
-═══════════════════════════ */
 
 type TabKey = "branches" | "profile";
 

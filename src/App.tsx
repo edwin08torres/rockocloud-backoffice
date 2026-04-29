@@ -1,14 +1,14 @@
 import { Toaster } from "react-hot-toast";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-import AdminLayout from "./layouts/AdminLayout";
-import Catalog from "./pages/Catalog";
-import Clients from "./pages/Clients";
-import Dashboard from "./pages/Dashboard";
-import Devices from "./pages/Devices";
-import Login from "./pages/Login";
-import Settings from "./pages/Settings";
-import { useAuthStore } from "./stores/useAuthStore";
+import AdminLayout from "@/layouts/AdminLayout";
+import Catalog from "@/pages/Catalog";
+import Clients from "@/pages/Clients";
+import Dashboard from "@/pages/Dashboard";
+import Devices from "@/pages/Devices";
+import Login from "@/pages/Login";
+import Settings from "@/pages/Settings";
+import { useAuthStore } from "@/stores/useAuthStore";
 
 function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   const { user } = useAuthStore();
@@ -31,6 +31,16 @@ export default function App() {
             border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: "12px",
             fontSize: "14px",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            maxWidth: "380px",
+          },
+          success: {
+            iconTheme: { primary: "#34d399", secondary: "#0f172a" },
+            duration: 4000,
+          },
+          error: {
+            iconTheme: { primary: "#f87171", secondary: "#0f172a" },
+            duration: 5000,
           },
         }}
       />

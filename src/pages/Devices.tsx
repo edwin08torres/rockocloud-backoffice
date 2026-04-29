@@ -14,10 +14,9 @@ import {
 import { useState, useEffect, useCallback } from "react";
 import toast from "react-hot-toast";
 
-import { useAuthStore } from "../stores/useAuthStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 
-const API_URL = "http://localhost:5165";
-
+const API_URL = import.meta.env.VITE_API_URL;
 
 interface Device {
   id: string;
@@ -41,7 +40,6 @@ interface Branch {
   id: string;
   name: string;
 }
-
 
 function CardSkeleton() {
   return (
@@ -76,7 +74,6 @@ function CardSkeleton() {
     </div>
   );
 }
-
 
 function DeviceCard({ device, isSuperAdmin }: { device: Device; isSuperAdmin: boolean }) {
   const [copied, setCopied] = useState(false);
@@ -260,7 +257,6 @@ function DeviceCard({ device, isSuperAdmin }: { device: Device; isSuperAdmin: bo
   );
 }
 
-
 function RegisterModal({
   onClose,
   onRegistered,
@@ -318,9 +314,9 @@ function RegisterModal({
         { headers: { Authorization: `Bearer ${token}` } }
       );
       console.log('Respuesta cruda del backend:', data);
-      
+
       const pinReal = data?.pin || data?.Pin || data?.PIN || data?.pairingPin;
-      
+
       setPinResult(data);
       setGeneratedPin(pinReal || null);
       setStep("pin");
@@ -724,10 +720,6 @@ function RegisterModal({
     </div>
   );
 }
-
-/* ═══════════════════════════
-   DEVICES PAGE
-═══════════════════════════ */
 
 export default function Devices() {
   const { token, user } = useAuthStore();

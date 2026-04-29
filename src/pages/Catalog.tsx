@@ -14,24 +14,23 @@ import {
   ChevronRight,
   Disc,
   ListMusic,
+  Edit2,
 } from "lucide-react";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import toast from "react-hot-toast";
 
-import { useAuthStore } from "../stores/useAuthStore";
+import api from "@/lib/api";
+import { useAuthStore } from "@/stores/useAuthStore";
 
-const API_URL = "http://localhost:5165";
 const ITEMS_PER_PAGE = 10;
-
 
 interface Song {
   id: string;
   title: string;
   artist: string;
   genre: string;
-  duration: number; // Seconds
+  duration: number;
 }
-
 
 function formatDuration(seconds: number) {
   if (!seconds || isNaN(seconds)) return "--:--";
@@ -39,7 +38,6 @@ function formatDuration(seconds: number) {
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
-
 
 function SongSkeleton() {
   return (
@@ -70,7 +68,6 @@ function SongSkeleton() {
   );
 }
 
-
 function DualUploadModal({
   onClose,
   onUploaded,
@@ -82,18 +79,24 @@ function DualUploadModal({
   const [mode, setMode] = useState<"file" | "link">("file");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Metadata Fields
   const [artist, setArtist] = useState("");
   const [album, setAlbum] = useState("");
   const [genre, setGenre] = useState("");
 
-  // File State
+  const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
+  const [albumSuggestions, setAlbumSuggestions] = useState<string[]>([]);
+
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Link State
   const [url, setUrl] = useState("");
+  const [isPreviewing, setIsPreviewing] = useState(false);
+
+  useEffect(() => {
+    api.get<string[]>("/api/Music/genres").then((r) => setGenreSuggestions(r.data)).catch(() => {});
+    api.get<string[]>("/api/Music/albums").then((r) => setAlbumSuggestions(r.data)).catch(() => {});
+  }, [token]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -125,6 +128,23 @@ function DualUploadModal({
     setFile(selectedFile);
   };
 
+  const handleUrlBlur = async () => {
+    const trimmed = url.trim();
+    if (!trimmed || isPreviewing || isSubmitting) return;
+    const isYoutube = /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\/.+/.test(trimmed);
+    if (!isYoutube) return;
+    try {
+      setIsPreviewing(true);
+      const { data } = await api.post<{ title?: string; artist?: string }>("/api/Music/preview-link", { url: trimmed });
+      if (data.artist) setArtist(data.artist);
+      toast.success("¡Artista detectado automáticamente!", { duration: 3000 });
+    } catch {
+      toast.error("No se pudo extraer información del link.", { duration: 4000 });
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!artist.trim() || !genre.trim()) {
       toast.error("El Artista y el Género son obligatorios.");
@@ -140,50 +160,41 @@ function DualUploadModal({
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      if (mode === "file") {
-        const formData = new FormData();
-        formData.append("File", file!);
-        formData.append("Artist", artist.trim());
-        formData.append("Album", album.trim());
-        formData.append("Genre", genre.trim());
+      setIsSubmitting(true);
+      try {
+        if (mode === "file") {
+          const formData = new FormData();
+          formData.append("File", file!);
+          formData.append("Artist", artist.trim());
+          formData.append("Album", album.trim());
+          formData.append("Genre", genre.trim());
 
-        await axios.post(`${API_URL}/api/Music/upload`, formData, {
-          headers: {
-            "Content-Type": "multipart/form-data",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-        toast.success("Archivo subido y procesado correctamente.");
-      } else {
-        await axios.post(
-          `${API_URL}/api/Music/download`,
-          {
+          await api.post("/api/Music/upload", formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+          toast.success("Archivo subido y procesado correctamente.", { duration: 4000 });
+        } else {
+          await api.post("/api/Music/download", {
             url: url.trim(),
             artist: artist.trim(),
             album: album.trim(),
             genre: genre.trim(),
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-        toast.success("Audio descargado y procesado correctamente.");
-      }
+          });
+          toast.success("Audio descargado correctamente. Se procesará en segundo plano.", { duration: 5000 });
+        }
 
-      onUploaded();
-      onClose();
-    } catch (err: unknown) {
-      let msg = "Error al procesar la canción.";
-      if (axios.isAxiosError(err) && err.response?.data) {
-        const d = err.response.data;
-        msg = typeof d === "string" ? d : d.message ?? d.title ?? d.detail ?? msg;
+        onUploaded();
+        onClose();
+      } catch (err: unknown) {
+        let msg = "Error al procesar la canción.";
+        if (axios.isAxiosError(err) && err.response?.data) {
+          const d = err.response.data;
+          msg = typeof d === "string" ? d : d.message ?? d.title ?? d.detail ?? msg;
+        }
+        toast.error(msg, { duration: 5000 });
+      } finally {
+        setIsSubmitting(false);
       }
-      toast.error(msg);
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const inputStyle = {
@@ -301,6 +312,71 @@ function DualUploadModal({
         </div>
 
         <div style={{ padding: "24px", overflowY: "auto", flex: 1 }}>
+
+          {mode === "link" && (
+            <>
+              <div style={{ marginBottom: "24px" }}>
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "6px",
+                    fontSize: "13px",
+                    color: "#94a3b8",
+                    marginBottom: "8px",
+                  }}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <LinkIcon style={{ width: "14px", height: "14px" }} />
+                    URL del Audio/Video (Ej. YouTube)
+                  </span>
+                  {isPreviewing && (
+                    <span
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        fontSize: "11px",
+                        color: "#818cf8",
+                        fontWeight: 600,
+                        animation: "pulse 1.5s infinite",
+                      }}
+                    >
+                      <Loader2 style={{ width: "12px", height: "12px", animation: "spin 1s linear infinite" }} />
+                      Buscando info...
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  style={{
+                    ...inputStyle,
+                    padding: "14px 16px",
+                    fontSize: "15px",
+                    borderColor: isPreviewing ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.1)",
+                  }}
+                  disabled={isSubmitting || isPreviewing}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+                  onBlur={(e) => {
+                    handleUrlBlur();
+                    if (!isPreviewing) e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+                  }}
+                />
+                <p style={{ fontSize: "11px", color: "#475569", marginTop: "6px" }}>
+                  Pega el link y sal del campo — el artista se detectará automáticamente.
+                </p>
+              </div>
+              <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "0 0 20px 0" }} />
+              <p style={{ fontSize: "12px", fontWeight: 600, color: "#475569", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "16px" }}>
+                Datos de la canción
+              </p>
+            </>
+          )}
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "24px" }}>
             <div style={{ gridColumn: "1 / -1" }}>
               <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Artista *</label>
@@ -309,8 +385,8 @@ function DualUploadModal({
                 value={artist}
                 onChange={(e) => setArtist(e.target.value)}
                 placeholder="Ej. Bad Bunny"
-                style={inputStyle}
-                disabled={isSubmitting}
+                style={{ ...inputStyle, opacity: isPreviewing ? 0.5 : 1, transition: "opacity 0.3s ease, border-color 0.2s ease" }}
+                disabled={isSubmitting || isPreviewing}
                 onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
                 onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
               />
@@ -322,11 +398,17 @@ function DualUploadModal({
                 value={album}
                 onChange={(e) => setAlbum(e.target.value)}
                 placeholder="Ej. Un Verano Sin Ti"
+                list="upload-album-options"
                 style={inputStyle}
                 disabled={isSubmitting}
                 onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
                 onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
               />
+              <datalist id="upload-album-options">
+                {albumSuggestions.map((a) => (
+                  <option key={a} value={a} />
+                ))}
+              </datalist>
             </div>
             <div>
               <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Género *</label>
@@ -335,11 +417,17 @@ function DualUploadModal({
                 value={genre}
                 onChange={(e) => setGenre(e.target.value)}
                 placeholder="Ej. Reggaeton"
+                list="upload-genre-options"
                 style={inputStyle}
                 disabled={isSubmitting}
                 onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
                 onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
               />
+              <datalist id="upload-genre-options">
+                {genreSuggestions.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
             </div>
           </div>
 
@@ -407,24 +495,7 @@ function DualUploadModal({
                 </>
               )}
             </div>
-          ) : (
-            <div>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>
-                <LinkIcon style={{ width: "14px", height: "14px" }} />
-                URL del Audio/Video (Ej. YouTube)
-              </label>
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-                style={{ ...inputStyle, padding: "14px 16px" }}
-                disabled={isSubmitting}
-                onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
-                onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
-              />
-            </div>
-          )}
+          ) : null}
 
           <div style={{ marginTop: "32px", display: "flex", gap: "12px" }}>
             <button
@@ -482,17 +553,282 @@ function DualUploadModal({
   );
 }
 
-/* ═══════════════════════════
-   CATALOG PAGE
-═══════════════════════════ */
+function EditSongModal({
+  song,
+  onClose,
+  onSaved,
+}: {
+  song: Song;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { token } = useAuthStore();
+  const [isSaving, setIsSaving] = useState(false);
+  const [form, setForm] = useState({
+    title: song.title,
+    artist: song.artist,
+    genre: song.genre,
+    album: "",
+  });
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 16px",
+    fontSize: "14px",
+    color: "#f1f5f9",
+    background: "rgba(0,0,0,0.35)",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: "10px",
+    outline: "none",
+    transition: "border-color 0.2s ease",
+  };
+
+  const [genreSuggestions, setGenreSuggestions] = useState<string[]>([]);
+  const [albumSuggestions, setAlbumSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    api.get<string[]>("/api/Music/genres").then((r) => setGenreSuggestions(r.data)).catch(() => {});
+    api.get<string[]>("/api/Music/albums").then((r) => setAlbumSuggestions(r.data)).catch(() => {});
+  }, [token]);
+
+  const handleSave = async () => {
+    if (!form.title.trim() || !form.artist.trim()) {
+      toast.error("El título y el artista son obligatorios.");
+      return;
+    }
+    try {
+      setIsSaving(true);
+      await api.put(`/api/Music/${song.id}`, {
+        title: form.title.trim(),
+        artist: form.artist.trim(),
+        genre: form.genre.trim(),
+        album: form.album.trim(),
+      });
+      toast.success("Canción actualizada correctamente.");
+      onSaved();
+      onClose();
+    } catch (err: unknown) {
+      let msg = "Error al actualizar la canción.";
+      if (axios.isAxiosError(err)) {
+        const d = err.response?.data;
+        msg = typeof d === "string" ? d : d?.message ?? d?.title ?? d?.detail ?? msg;
+      }
+      toast.error(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 60,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "24px",
+        background: "rgba(0,0,0,0.6)",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: "480px",
+          background: "#0f172a",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: "20px",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+          display: "flex",
+          flexDirection: "column",
+          maxHeight: "90vh",
+          animation: "fadeIn 0.2s ease-out",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "20px 24px",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          <div>
+            <p style={{ fontSize: "17px", fontWeight: 600, color: "#f1f5f9" }}>Editar Canción</p>
+            <p style={{ fontSize: "13px", color: "#64748b", marginTop: "2px" }}>Modifica los metadatos</p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={isSaving}
+            style={{
+              width: "32px",
+              height: "32px",
+              borderRadius: "8px",
+              border: "none",
+              background: "rgba(255,255,255,0.05)",
+              color: "#94a3b8",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: isSaving ? 0.4 : 1,
+            }}
+          >
+            <X style={{ width: "16px", height: "16px" }} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            padding: "24px",
+            overflowY: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: "20px",
+          }}
+        >
+          <div>
+            <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Título *</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              disabled={isSaving}
+              style={{ ...inputStyle, opacity: isSaving ? 0.5 : 1 }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
+            />
+          </div>
+          <div>
+            <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Artista *</label>
+            <input
+              type="text"
+              value={form.artist}
+              onChange={(e) => setForm({ ...form, artist: e.target.value })}
+              disabled={isSaving}
+              style={{ ...inputStyle, opacity: isSaving ? 0.5 : 1 }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
+            />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Género</label>
+              <input
+                type="text"
+                value={form.genre}
+                onChange={(e) => setForm({ ...form, genre: e.target.value })}
+                disabled={isSaving}
+                list="edit-genre-options"
+                style={{ ...inputStyle, opacity: isSaving ? 0.5 : 1 }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
+              />
+              <datalist id="edit-genre-options">
+                {genreSuggestions.map((g) => (
+                  <option key={g} value={g} />
+                ))}
+              </datalist>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: "13px", color: "#94a3b8", marginBottom: "6px" }}>Álbum</label>
+              <input
+                type="text"
+                value={form.album}
+                onChange={(e) => setForm({ ...form, album: e.target.value })}
+                disabled={isSaving}
+                list="edit-album-options"
+                style={{ ...inputStyle, opacity: isSaving ? 0.5 : 1 }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(99,102,241,0.5)"; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)"; }}
+              />
+              <datalist id="edit-album-options">
+                {albumSuggestions.map((a) => (
+                  <option key={a} value={a} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "16px 24px 20px",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            display: "flex",
+            gap: "12px",
+            justifyContent: "flex-end",
+          }}
+        >
+          <button
+            onClick={onClose}
+            disabled={isSaving}
+            style={{
+              padding: "10px 20px",
+              fontSize: "14px",
+              fontWeight: 500,
+              color: "#94a3b8",
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "10px",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              opacity: isSaving ? 0.4 : 1,
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "10px 24px",
+              fontSize: "14px",
+              fontWeight: 600,
+              color: isSaving ? "rgba(255,255,255,0.7)" : "#fff",
+              background: isSaving ? "rgba(99,102,241,0.5)" : "#6366f1",
+              border: "none",
+              borderRadius: "10px",
+              cursor: isSaving ? "not-allowed" : "pointer",
+              boxShadow: isSaving ? "none" : "0 4px 16px rgba(99,102,241,0.35)",
+              transition: "all 0.2s ease",
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving) e.currentTarget.style.background = "#4f46e5";
+            }}
+            onMouseLeave={(e) => {
+              if (!isSaving) e.currentTarget.style.background = "#6366f1";
+            }}
+          >
+            {isSaving ? (
+              <>
+                <Loader2 style={{ width: "16px", height: "16px", animation: "spin 1s linear infinite" }} />
+                Guardando...
+              </>
+            ) : (
+              "Guardar Cambios"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Catalog() {
   const { token } = useAuthStore();
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [editingSong, setEditingSong] = useState<Song | null>(null);
 
-  // Filters & Pagination State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGenre, setSelectedGenre] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -500,9 +836,7 @@ export default function Catalog() {
   const fetchCatalog = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await axios.get<Song[]>(`${API_URL}/api/Music/library`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const { data } = await api.get<Song[]>("/api/Music/library");
       setSongs(data);
     } catch {
       toast.error("No se pudo cargar el catálogo musical.");
@@ -515,13 +849,11 @@ export default function Catalog() {
     fetchCatalog();
   }, [fetchCatalog]);
 
-  // Derived State: Genres
   const uniqueGenres = useMemo(() => {
     const genres = new Set(songs.map((s) => s.genre).filter(Boolean));
     return Array.from(genres).sort();
   }, [songs]);
 
-  // Derived State: Filtered & Paginated Data
   const filteredSongs = useMemo(() => {
     return songs.filter((song) => {
       const matchSearch =
@@ -538,7 +870,6 @@ export default function Catalog() {
     currentPage * ITEMS_PER_PAGE
   );
 
-  // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, selectedGenre]);
@@ -767,6 +1098,7 @@ export default function Catalog() {
               <div style={{ flex: 1, paddingLeft: "52px" }}>Canción</div>
               <div style={{ width: "140px" }}>Género</div>
               <div style={{ width: "80px", textAlign: "right" }}>Duración</div>
+              <div style={{ width: "48px" }} />
             </div>
 
             {currentSongs.map((song, idx) => (
@@ -869,6 +1201,38 @@ export default function Catalog() {
                   <Clock style={{ width: "14px", height: "14px", color: "#475569" }} />
                   {formatDuration(song.duration)}
                 </div>
+
+                <div style={{ width: "48px", flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                  <button
+                    onClick={() => setEditingSong(song)}
+                    title="Editar canción"
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "8px",
+                      background: "transparent",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      color: "#64748b",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = "rgba(99,102,241,0.1)";
+                      e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)";
+                      e.currentTarget.style.color = "#818cf8";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)";
+                      e.currentTarget.style.color = "#64748b";
+                    }}
+                  >
+                    <Edit2 style={{ width: "14px", height: "14px" }} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -885,7 +1249,7 @@ export default function Catalog() {
               <p style={{ fontSize: "14px", color: "#64748b" }}>
                 Mostrando <span style={{ color: "#e2e8f0", fontWeight: 500 }}>{currentSongs.length}</span> resultados
               </p>
-              
+
               <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                 <button
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
@@ -910,7 +1274,7 @@ export default function Catalog() {
                   <ChevronLeft style={{ width: "16px", height: "16px" }} />
                   Anterior
                 </button>
-                
+
                 <span style={{ fontSize: "14px", color: "#94a3b8", fontWeight: 500 }}>
                   Página <span style={{ color: "#f1f5f9" }}>{currentPage}</span> de {totalPages}
                 </span>
@@ -948,6 +1312,14 @@ export default function Catalog() {
         <DualUploadModal
           onClose={() => setShowModal(false)}
           onUploaded={fetchCatalog}
+        />
+      )}
+
+      {editingSong && (
+        <EditSongModal
+          song={editingSong}
+          onClose={() => setEditingSong(null)}
+          onSaved={fetchCatalog}
         />
       )}
     </div>

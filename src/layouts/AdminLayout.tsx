@@ -14,7 +14,7 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { Navigate, Outlet, NavLink } from "react-router-dom";
 
-import { useAuthStore } from "../stores/useAuthStore";
+import { useAuthStore } from "@/stores/useAuthStore";
 
 const NAV_ITEMS = [
   { to: "/",         label: "Dashboard",     icon: LayoutDashboard, end: true },

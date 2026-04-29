@@ -2,7 +2,7 @@ import axios from 'axios'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-const API_URL = 'http://localhost:5165'
+const API_URL = import.meta.env.VITE_API_URL
 
 interface UserInfo {
   id: string
@@ -34,7 +34,7 @@ export const useAuthStore = create<AuthState>()(
             email,
             password,
           })
-          // Adapta según el shape real de tu API (.NET response)
+
           set({
             token: data.token,
             user: {
